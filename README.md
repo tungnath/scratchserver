@@ -1,2 +1,2 @@
-# scratch_server
+# ScratchServer
 Simple web server in Kotlin
