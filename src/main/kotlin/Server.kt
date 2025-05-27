@@ -71,6 +71,14 @@ fun serveStaticFiles(path: String): Pair<String, String>? {
     return Pair(contentType, content)
 }
 
+fun handleApiRequest(path: String): Pair<String, String>? {
+    return when (path) {
+        "api/hello" -> Pair("text/plain", "Hello World!")
+        "api/hello-json" -> Pair("application/json", """{"message":"Hello World!"}""")
+        else -> null
+    }
+}
+
 fun main() {
 
     val port = 8080
@@ -99,7 +107,18 @@ fun main() {
         val parsedHttpRequest = parseRequest(requestStr)
         println("Parsed HTTP request: $parsedHttpRequest")
 
-
+        // 3. handle API requests
+        val response = handleApiRequest(parsedHttpRequest.path)
+        if (response == null) {
+            sendResponse(
+                clientSocket,
+                "404 Not Found",
+                "text/plain; charset=utf-8",
+                "File not found."
+            )
+            clientSocket.close()
+            continue
+        }
 
         // 2. serve static files
         serveStaticFiles(parsedHttpRequest.path)?:run {
