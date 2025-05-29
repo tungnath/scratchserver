@@ -1,5 +1,8 @@
 package com.ravi
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
@@ -73,29 +76,39 @@ fun serveStaticFiles(path: String): Pair<String, String>? {
 
 fun handleApiRequest(path: String): Pair<String, String>? {
     return when (path) {
-        "api/hello" -> Pair("text/plain", "Hello World!")
-        "api/hello-json" -> Pair("application/json", """{"message":"Hello World!"}""")
-        else -> null
+        "/api/hello" -> Pair("text/plain", "Hello World!")
+        "/api/hello-json" -> Pair("application/json", """{"message":"Hello World!"}""")
+        else -> {
+            println("am i here $path")
+            null
+        }
     }
 }
 
-fun main() {
 
-    val port = 8080
-    val serverSocket = ServerSocket(port)
 
-    println("Server listening on port $port")
 
-    while (true) {
-        val clientSocket = serverSocket.accept()
+suspend fun handleClient(clientSocket: Socket) {
+    try {
         println("New client connected!")
 
         // Read from the client socket
-        val reader = BufferedReader(InputStreamReader(clientSocket.getInputStream()))
+        val inputStream = clientSocket.getInputStream()
+
+        if (inputStream.available() <= 0) {
+            println("No data available in the input stream!")
+            sendResponse(
+                clientSocket, "400 Bad Request", "text/plain; charset=utf-8", "No request data received."
+            )
+            return
+        }
+
+        val reader = BufferedReader(InputStreamReader(inputStream))
         val request = StringBuilder()
         var line: String?
 
         while (reader.readLine().also { line = it } != null) {
+            println("each line is $line")
             request.append(line).append("\n")
             if (line!!.isEmpty()) break
         }
@@ -110,38 +123,81 @@ fun main() {
         // 3. handle API requests
         val response = handleApiRequest(parsedHttpRequest.path)
         if (response == null) {
+
+            //        // 2. serve static files
+//        serveStaticFiles(parsedHttpRequest.path)?:run {
+//            sendResponse(
+//                clientSocket,
+//                "404 Not Found",
+//                "text/plain; charset=utf-8",
+//                "File not found."
+//            )
+//            clientSocket.close()
+//            return@run
+//        }
+
             sendResponse(
-                clientSocket,
-                "404 Not Found",
-                "text/plain; charset=utf-8",
-                "File not found."
+                clientSocket, "404 Not Found", "text/plain; charset=utf-8", "File not found."
             )
-            clientSocket.close()
-            continue
+
+//            clientSocket.close()
+//        continue
         }
 
-        // 2. serve static files
-        serveStaticFiles(parsedHttpRequest.path)?:run {
-            sendResponse(
-                clientSocket,
-                "404 Not Found",
-                "text/plain; charset=utf-8",
-                "File not found."
-            )
-            clientSocket.close()
-            return@run
-        }
+        val (contentType, contentValue) = response!! // response here is non null
+        sendResponse(clientSocket, "200 OK", contentType, contentValue)
+//        clientSocket.close()
+//        return
+
+//        // 2. serve static files
+//        serveStaticFiles(parsedHttpRequest.path)?:run {
+//            sendResponse(
+//                clientSocket,
+//                "404 Not Found",
+//                "text/plain; charset=utf-8",
+//                "File not found."
+//            )
+//            clientSocket.close()
+//            return@run
+//        }
 
 
-        // 1. send basic response
-        sendResponse(
-            clientSocket,
-            "200 OK",
-            "text/plain; charset=utf-8",
-            "Hey, Thank you for calling.\nCan hear you fine and this is your ref no. ${Random.nextInt(19998)}.\n\nThanks."
-        )
+//        // 1. send basic response
+//        sendResponse(
+//            clientSocket,
+//            "200 OK",
+//            "text/plain; charset=utf-8",
+//            "Hey, Thank you for calling.\nCan hear you fine and this is your ref no. ${Random.nextInt(19998)}.\n\nThanks."
+//        )
+//        clientSocket.close()
+
+    } catch (e: Exception) {
+        println("error: ${e.message}")
+    } finally {
         clientSocket.close()
+    }
+
+}
+
+
+fun main() = runBlocking {
+
+    val port = 8080
+    val serverSocket = ServerSocket(port)
+
+    println("Server listening on port $port")
+
+    while (true) {
+        val clientSocket = serverSocket.accept()
+
+        // launch a coroutine for each client
+        launch(Dispatchers.IO) {
+            handleClient(clientSocket)
+        }
+
     }
 
 
 }
+
+
