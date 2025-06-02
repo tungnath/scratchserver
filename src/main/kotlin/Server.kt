@@ -10,7 +10,9 @@ import java.io.PrintWriter
 import java.net.ServerSocket
 import java.net.Socket
 import java.nio.file.Files
-import kotlin.random.Random
+
+
+data class HttpRequest(val method: String, val path: String, val version: String, val headers: Map<String, String>)
 
 
 fun parseRequest(requestStr: String): HttpRequest {
@@ -55,9 +57,31 @@ fun sendResponse(clientSocket: Socket, status: String, contentType: String, body
     writer.flush()
 }
 
+fun sendFileResponse(clientSocket: Socket, file: File) {
+    val writer = PrintWriter(clientSocket.getOutputStream(), true)
+    val contentType = when (file.extension) {
+        "html" -> "text/html"
+        "css" -> "text/css"
+        "js" -> "application/javascript"
+        else -> "text/plain"
+    }
+
+    writer.println("HTTP/1.1 200 OK")
+    writer.println("Content-Type: $contentType")
+    writer.println("Content-Length: ${file.length()}")
+    writer.println()
+    writer.flush()
+
+    // Stream the file content
+    file.inputStream().use { input ->
+        clientSocket.getOutputStream().use { output -> input.copyTo(output) }
+    }
+
+}
+
 fun serveStaticFiles(path: String): Pair<String, String>? {
 
-    val filepath = "static/${path.takeIf { it != "/" } ?: "/index.html"}"
+    val filepath = "static${path.takeIf { it != "/" } ?: "/index.html"}"
     println("File path: $filepath")
 
     val file = File(filepath)
@@ -71,6 +95,8 @@ fun serveStaticFiles(path: String): Pair<String, String>? {
         else -> "text/plain"
     }
 
+    println("File and contenttype check $contentType $content")
+
     return Pair(contentType, content)
 }
 
@@ -79,13 +105,11 @@ fun handleApiRequest(path: String): Pair<String, String>? {
         "/api/hello" -> Pair("text/plain", "Hello World!")
         "/api/hello-json" -> Pair("application/json", """{"message":"Hello World!"}""")
         else -> {
-            println("am i here $path")
+            println("Invalid API : $path")
             null
         }
     }
 }
-
-
 
 
 suspend fun handleClient(clientSocket: Socket) {
@@ -124,30 +148,24 @@ suspend fun handleClient(clientSocket: Socket) {
         val response = handleApiRequest(parsedHttpRequest.path)
         if (response == null) {
 
-            //        // 2. serve static files
-//        serveStaticFiles(parsedHttpRequest.path)?:run {
+            // 2. serve static files
+            serveStaticFiles(parsedHttpRequest.path) ?: run {
+                sendResponse(
+                    clientSocket, "404 Not Found", "text/plain; charset=utf-8", "File not found."
+                )
+//                clientSocket.close()
+//                return@run
+            }
+
 //            sendResponse(
-//                clientSocket,
-//                "404 Not Found",
-//                "text/plain; charset=utf-8",
-//                "File not found."
+//                clientSocket, "404 Not Found", "text/plain; charset=utf-8", "File not found."
 //            )
-//            clientSocket.close()
-//            return@run
-//        }
 
-            sendResponse(
-                clientSocket, "404 Not Found", "text/plain; charset=utf-8", "File not found."
-            )
-
-//            clientSocket.close()
-//        continue
+        } else {
+            val (contentType, contentValue) = response // response here is non null
+            sendResponse(clientSocket, "200 OK", contentType, contentValue)
         }
 
-        val (contentType, contentValue) = response!! // response here is non null
-        sendResponse(clientSocket, "200 OK", contentType, contentValue)
-//        clientSocket.close()
-//        return
 
 //        // 2. serve static files
 //        serveStaticFiles(parsedHttpRequest.path)?:run {
@@ -172,7 +190,7 @@ suspend fun handleClient(clientSocket: Socket) {
 //        clientSocket.close()
 
     } catch (e: Exception) {
-        println("error: ${e.message}")
+        println("error: ${e.localizedMessage}")
     } finally {
         clientSocket.close()
     }
